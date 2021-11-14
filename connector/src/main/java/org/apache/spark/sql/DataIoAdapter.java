@@ -15,10 +15,10 @@ import com.huawei.boostkit.omnidata.model.datasource.DataSource;
 import com.huawei.boostkit.omnidata.model.datasource.hdfs.HdfsOrcDataSource;
 import com.huawei.boostkit.omnidata.model.datasource.hdfs.HdfsParquetDataSource;
 import com.huawei.boostkit.omnidata.reader.impl.DataReaderImpl;
-import com.huawei.boostkit.omnidata.spark.SparkDeserializer;
-import com.huawei.boostkit.omnidata.type.DecodeType;
-import com.huawei.boostkit.omnidata.type.LongDecodeType;
-import com.huawei.boostkit.omnidata.type.RowDecodeType;
+import com.huawei.boostkit.omnidata.decode.impl.SparkDeserializer;
+import com.huawei.boostkit.omnidata.decode.type.DecodeType;
+import com.huawei.boostkit.omnidata.decode.type.LongDecodeType;
+import com.huawei.boostkit.omnidata.decode.type.RowDecodeType;
 
 import com.google.common.collect.ImmutableMap;
 
@@ -92,8 +92,6 @@ import java.util.Set;
 
 /**
  * DataIoAdapter
- *
- * @since 2021-03-31
  */
 public class DataIoAdapter {
     private static int TASK_FAILED_TIMES = 3;
@@ -145,7 +143,6 @@ public class DataIoAdapter {
      * @param partitionColumn partition column
      * @param filterOutPut filter schema
      * @param pushDownOperators push down expressions
-     * @param omniDataProperties auth properties
      * @return WritableColumnVector data result info
      * @throws TaskExecutionException connect to omni-data-server failed exception
      * @notice 3rd parties api throws Exception, function has to catch basic Exception
@@ -155,8 +152,7 @@ public class DataIoAdapter {
         Seq<Attribute> sparkOutPut,
         Seq<Attribute> partitionColumn,
         Seq<Attribute> filterOutPut,
-        PushDownInfo pushDownOperators,
-        OmniDataProperties omniDataProperties) throws TaskExecutionException, UnknownHostException {
+        PushDownInfo pushDownOperators) throws TaskExecutionException, UnknownHostException {
         // initCandidates
         initCandidates(pageCandidate, filterOutPut);
 
@@ -185,7 +181,6 @@ public class DataIoAdapter {
             ImmutableMap.of(), ImmutableMap.of(), aggregations, limitLong);
         TaskSource taskSource = new TaskSource(dataSource, predicate, 1048576);
         SparkDeserializer deserializer = initSparkDesializer();
-        Properties properties = NdpUtils.getProperties(omniDataProperties);
         WritableColumnVector[] page = null;
         int failedTimes = 0;
         String[] sdiHostArray = pageCandidate.getSdiHosts().split(",");
@@ -204,7 +199,8 @@ public class DataIoAdapter {
                 }
             }
             String ipAddress = InetAddress.getByName(sdiHost).getHostAddress();
-            properties.put("grpc.client.target", ipAddress + ":" + pageCandidate.getSdiPort());
+            Properties properties = new Properties();
+            properties.put("omnidata.client.target.list", ipAddress);
             orcDataReader = new DataReaderImpl<SparkDeserializer>(
                 properties, taskSource, deserializer);
             hasNextPage = true;
@@ -252,7 +248,8 @@ public class DataIoAdapter {
             }
         }
         if (failedTimes >= TASK_FAILED_TIMES) {
-            throw new TaskExecutionException("No Omni-data-server to Connect.");
+            LOG.warn("No Omni-data-server to Connect, Tast has tried {} times.", TASK_FAILED_TIMES);
+            throw new TaskExecutionException("No Omni-data-server to Connect");
         }
         List<WritableColumnVector[]> l = new ArrayList<>();
         l.add(page);
@@ -293,6 +290,7 @@ public class DataIoAdapter {
         filePath = pageCandidate.getFilePath();
         columnOffset = pageCandidate.getColumnOffset();
         listAtt = JavaConverters.seqAsJavaList(filterOutPut);
+        TASK_FAILED_TIMES = pageCandidate.getMaxFailedTimes();
     }
 
     private RowExpression extractNamedExpression(Expression namedExpression) {
@@ -844,6 +842,5 @@ public class DataIoAdapter {
         }
     }
 }
-
 
 

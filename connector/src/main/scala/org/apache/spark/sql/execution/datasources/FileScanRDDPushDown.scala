@@ -27,7 +27,7 @@ import org.apache.parquet.io.ParquetDecodingException
 import org.apache.spark.{Partition => RDDPartition, SparkUpgradeException, TaskContext}
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.rdd.{InputFileBlockHolder, RDD}
-import org.apache.spark.sql.{DataIoAdapter, NdpUtils, OmniDataProperties, PageCandidate, PageToColumnar, SparkSession}
+import org.apache.spark.sql.{DataIoAdapter, NdpUtils, PageCandidate, PageToColumnar, SparkSession}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.execution.QueryExecutionException
@@ -53,12 +53,7 @@ class FileScanRDDPushDown(
 
   var columnOffset = -1
   var filterOutput : Seq[Attribute] = Seq()
-  val sdiPort = NdpConf.getNdpSdiPort(sparkSession)
-  val grpcSslEnabled = NdpConf.getNdpGrpcSslEnabled(sparkSession)
-  val grpcCertPath = NdpConf.getNdpGrpcClientCertFilePath(sparkSession)
-  val grpcKeyPath = NdpConf.getNdpGrpcClientPrivateKeyFilePath(sparkSession)
-  val grpcCaPath = NdpConf.getNdpGrpcTrustCaFilePath(sparkSession)
-  val grpcPkiDir = NdpConf.getNdpPkiDir(sparkSession)
+  val maxFailedTimes = NdpConf.getMaxFailedTimes(sparkSession).toInt
   if (pushDownOperators.filterExecutions != null && pushDownOperators.filterExecutions.size > 0) {
     columnOffset = NdpUtils.getColumnOffset(dataSchema,
       pushDownOperators.filterExecutions(0).output)
@@ -71,6 +66,12 @@ class FileScanRDDPushDown(
     filterOutput = output
   }
   val fpuMap = pushDownOperators.fpuHosts
+  var fpuList : Seq[String] = Seq()
+  val fpuIterator = fpuMap.toIterator
+  while (fpuIterator.hasNext) {
+    fpuList = fpuList ++ Seq(fpuIterator.next()._1)
+  }
+
   val filterExecution = pushDownOperators.filterExecutions
   val aggExecution = pushDownOperators.aggExecutions
   val limitExecution = pushDownOperators.limitExecution
@@ -151,14 +152,13 @@ class FileScanRDDPushDown(
       private def nextIterator(): Boolean = {
         if (files.hasNext) {
           currentFile = files.next()
-          logInfo(s"Reading File $currentFile")
+          // logInfo(s"Reading File $currentFile")
           InputFileBlockHolder.set(currentFile.filePath, currentFile.start, currentFile.length)
           val pageCandidate = new PageCandidate(currentFile.filePath, currentFile.start,
-            currentFile.length, columnOffset, sdiHosts, fileFormat.toString, sdiPort)
-          val omniDataProperties = new OmniDataProperties(grpcSslEnabled,
-            grpcCertPath, grpcKeyPath, grpcCaPath, grpcPkiDir)
+            currentFile.length, columnOffset, sdiHosts,
+            fileFormat.toString, maxFailedTimes)
           val dataIoPage = dataIoClass.getPageIterator(pageCandidate, output,
-            partitionColumns, filterOutput, pushDownOperators, omniDataProperties)
+            partitionColumns, filterOutput, pushDownOperators)
           currentIterator = pageToColumnarClass.transPageToColumnar(dataIoPage,
             isColumnVector).asScala.iterator
           try {
@@ -203,18 +203,26 @@ class FileScanRDDPushDown(
     filePartitions.map { partitionFile => {
       val retHost = mutable.HashMap.empty[String, Long]
       partitionFile.files.foreach { partitionMap => {
-        partitionMap.locations.filter(_ != "localhost").foreach {
+        partitionMap.locations.foreach {
           sdiKey => {
             retHost(sdiKey) = retHost.getOrElse(sdiKey, 0L) + partitionMap.length
             sdiKey
         }}
       }}
+
       val datanode = retHost.toSeq.sortWith((x, y) => x._2 > y._2).toIterator
       var mapNum = 0
-      while (datanode.hasNext && mapNum < 3) {
+      while (datanode.hasNext && mapNum < maxFailedTimes) {
         val datanodeStr = datanode.next()._1
         if (fpuMap.contains(datanodeStr)) {
           val partitioned = fpuMap(datanodeStr)
+          if (!"".equalsIgnoreCase(partitionFile.sdi)) {
+            partitionFile.sdi ++= ","
+          }
+          partitionFile.sdi ++= partitioned
+        } else if (datanodeStr.equalsIgnoreCase("localhost")) {
+          val index = NdpUtils.getFpuHosts(fpuList.size)
+          val partitioned = fpuList(index)
           if (!"".equalsIgnoreCase(partitionFile.sdi)) {
             partitionFile.sdi ++= ","
           }
@@ -231,4 +239,3 @@ class FileScanRDDPushDown(
     split.asInstanceOf[FilePartition].preferredLocations()
   }
 }
-
