@@ -1,6 +1,6 @@
 package org.apache.spark.sql;
 
-import com.huawei.boostkit.omnidata.type.*;
+import com.huawei.boostkit.omnidata.decode.type.*;
 
 import io.airlift.slice.Slice;
 import io.prestosql.spi.relation.ConstantExpression;
@@ -42,6 +42,7 @@ import static io.prestosql.spi.type.TinyintType.TINYINT;
 import static io.prestosql.spi.type.VarcharType.VARCHAR;
 import static java.lang.Float.floatToIntBits;
 import static java.lang.Float.parseFloat;
+import static org.apache.hadoop.hdfs.DFSUtil.getRandom;
 
 /**
  * NdpUtils
@@ -313,21 +314,17 @@ public class NdpUtils {
             Matcher matcher = pn.matcher(strColumn);
             if (matcher.find()) {
                 partitionValue = strColumn.split("\\=")[1];
+                if (partitionValue.contains("__HIVE_DEFAULT_PARTITION__")) {
+                    partitionValue = null;
+                }
                 break;
             }
         }
         return partitionValue;
     }
 
-    public static Properties getProperties(OmniDataProperties omniDataProperties) {
-        Properties omniProperties = new Properties();
-        omniProperties.put("grpc.ssl.enabled", omniDataProperties.isGrpcSslEnabled());
-        omniProperties.put("grpc.client.cert.file.path", omniDataProperties.getGrpcCertPath());
-        omniProperties.put("grpc.client.private.key.file.path",
-            omniDataProperties.getGrpcKeyPath());
-        omniProperties.put("grpc.trust.ca.file.path", omniDataProperties.getGrpcCaPath());
-        omniProperties.put("pki.dir", omniDataProperties.getPkiDir());
-        return omniProperties;
+    public static int getFpuHosts(int hostSize) {
+        int pushDownNodeIndex = (int) (Math.random() * hostSize);
+        return pushDownNodeIndex;
     }
 }
-

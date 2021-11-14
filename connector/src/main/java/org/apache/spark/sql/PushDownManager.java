@@ -20,9 +20,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * PushDownManager Operate zookeeper data.
- *
- * @date 2021/3/13 20:26
+ * PushDownManager Operate zookeeper data
  */
 public class PushDownManager {
     private static final Logger LOG = LoggerFactory.getLogger(PushDownManager.class);
@@ -109,4 +107,3 @@ public class PushDownManager {
         return retMap;
     }
 }
-
