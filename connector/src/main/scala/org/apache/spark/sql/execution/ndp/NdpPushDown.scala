@@ -26,6 +26,7 @@ import org.apache.spark.sql.catalyst.expressions.{And, Attribute, AttributeRefer
 import org.apache.spark.sql.catalyst.expressions.aggregate.{Partial, PartialMerge}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.{FileSourceScanExec, FilterExec, GlobalLimitExec, LeafExecNode, LocalLimitExec, ProjectExec, SparkPlan}
+import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, InsertAdaptiveSparkPlan}
 import org.apache.spark.sql.execution.aggregate.{BaseAggregateExec, HashAggregateExec, ObjectHashAggregateExec, SortAggregateExec}
 import org.apache.spark.sql.execution.datasources.HadoopFsRelation
 import org.apache.spark.sql.internal.SQLConf
@@ -74,6 +75,11 @@ case class NdpPushDown(sparkSession: SparkSession)
   def shouldPushDown(plan: SparkPlan): Boolean = {
     var isPush = false
     val p = plan.transformUp {
+      case a: AdaptiveSparkPlanExec =>
+        if (shouldPushDown(a.initialPlan)) {
+          isPush = true
+        }
+        plan
       case s: FileSourceScanExec =>
         if (s.metadata.get("Location").toString.contains("[hdfs") ||
           s.metadata.get("Location").toString.contains("[cephrgw") ||
@@ -168,6 +174,8 @@ case class NdpPushDown(sparkSession: SparkSession)
 
   def pushDownOperator(plan: SparkPlan): SparkPlan = {
     val p = plan.transformUp {
+      case a: AdaptiveSparkPlanExec =>
+        InsertAdaptiveSparkPlan(a.context)(pushDownOperator(a.initialPlan))
       case s: FileSourceScanExec if shouldPushDown(s.relation) =>
         val filters = s.partitionFilters.filter { x =>
           filterWhiteList.contains(x.prettyName) || udfWhiteList.contains(x.prettyName)
