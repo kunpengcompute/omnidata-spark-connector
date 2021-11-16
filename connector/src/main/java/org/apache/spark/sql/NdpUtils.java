@@ -313,6 +313,9 @@ public class NdpUtils {
             Matcher matcher = pn.matcher(strColumn);
             if (matcher.find()) {
                 partitionValue = strColumn.split("\\=")[1];
+                if (partitionValue.contains("__HIVE_DEFAULT_PARTITION__")) {
+                    partitionValue = null;
+                }
                 break;
             }
         }
