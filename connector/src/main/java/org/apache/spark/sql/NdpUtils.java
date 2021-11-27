@@ -8,12 +8,14 @@ import io.prestosql.spi.type.ArrayType;
 import io.prestosql.spi.type.Type;
 
 import org.apache.spark.sql.catalyst.expressions.Attribute;
+import org.apache.spark.sql.catalyst.expressions.Cast;
 import org.apache.spark.sql.catalyst.expressions.Expression;
 import org.apache.spark.sql.catalyst.expressions.NamedExpression;
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateFunction;
 import org.apache.spark.sql.execution.ndp.AggExeInfo;
 import org.apache.spark.sql.execution.ndp.LimitExeInfo;
 import org.apache.spark.sql.types.DataType;
+import org.apache.spark.sql.types.DateType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
@@ -21,6 +23,9 @@ import scala.Option;
 import scala.collection.JavaConverters;
 import scala.collection.Seq;
 
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.time.format.ResolverStyle;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -326,5 +331,25 @@ public class NdpUtils {
     public static int getFpuHosts(int hostSize) {
         int pushDownNodeIndex = (int) (Math.random() * hostSize);
         return pushDownNodeIndex;
+    }
+
+    public static boolean isValidDateFormat(String dateString) {
+        boolean isValid = true;
+        String pattern = "yyyy-MM-dd";
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pattern).withResolverStyle(ResolverStyle.STRICT);
+        try {
+            formatter.parse(dateString);
+        } catch (DateTimeParseException e) {
+            isValid = false;
+        }
+        return isValid;
+    }
+
+    public static boolean isInDateExpression(Expression expression, String Operator) {
+        boolean isInDate = false;
+        if (expression instanceof Cast && Operator.equals("in")) {
+            isInDate = ((Cast) expression).child().dataType() instanceof DateType;
+        }
+        return isInDate;
     }
 }
