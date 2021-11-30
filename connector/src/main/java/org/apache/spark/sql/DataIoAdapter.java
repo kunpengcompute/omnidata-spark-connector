@@ -46,6 +46,7 @@ import org.apache.spark.sql.catalyst.expressions.And;
 import org.apache.spark.sql.catalyst.expressions.Attribute;
 import org.apache.spark.sql.catalyst.expressions.AttributeReference;
 import org.apache.spark.sql.catalyst.expressions.BinaryArithmetic;
+import org.apache.spark.sql.catalyst.expressions.Cast;
 import org.apache.spark.sql.catalyst.expressions.Divide;
 import org.apache.spark.sql.catalyst.expressions.EqualTo;
 import org.apache.spark.sql.catalyst.expressions.Expression;
@@ -76,6 +77,7 @@ import org.slf4j.LoggerFactory;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.sql.Date;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -696,6 +698,11 @@ public class DataIoAdapter {
         if (leftExpression instanceof AttributeReference) {
             prestoType = NdpUtils.transOlkDataType(leftExpression.dataType(), false);
             filterProjectionId = putFilterValue(leftExpression, prestoType);
+        } else if (NdpUtils.isInDateExpression(leftExpression, operatorName)) {
+            ndpUdfExpressions.createNdpUdf(leftExpression, expressionInfo, fieldMap);
+            putFilterValue(expressionInfo.getChildExpression(), expressionInfo.getFieldDataType());
+            prestoType = NdpUtils.transOlkDataType(((Cast) leftExpression).child().dataType(), false);
+            filterProjectionId = expressionInfo.getProjectionId();
         } else {
             ndpUdfExpressions.createNdpUdf(leftExpression, expressionInfo, fieldMap);
             putFilterValue(expressionInfo.getChildExpression(), expressionInfo.getFieldDataType());
@@ -717,8 +724,12 @@ public class DataIoAdapter {
                 null, multiArguments, "multy_columns");
         } else {
             // get right value
-            argumentValues = getValue(rightExpression, signatureName,
-                leftExpression.dataType().toString());
+            if (NdpUtils.isInDateExpression(leftExpression, operatorName)) {
+                argumentValues = getDateValue(rightExpression);
+            } else {
+                argumentValues = getValue(rightExpression, signatureName,
+                        leftExpression.dataType().toString());
+            }
             rowExpression = NdpFilterUtils.generateRowExpression(
                 signatureName, expressionInfo, prestoType, filterProjectionId,
                 argumentValues, null, signatureName);
@@ -749,6 +760,26 @@ public class DataIoAdapter {
             columnNameMap.put(filterColumnName, columnNameMap.size());
         }
         return filterProjectionId;
+    }
+
+    // for date parse
+    private List<Object> getDateValue(List<Expression> rightExpression) {
+        long DAY_TO_MILL_SECS = 24L * 3600L * 1000L;
+        List<Object> dateTimes = new ArrayList<>();
+        for (Expression rExpression: rightExpression) {
+            String dateStr = rExpression.toString();
+            if (NdpUtils.isValidDateFormat(dateStr)) {
+                String[] dateStrArray = dateStr.split("-");
+                int year = Integer.parseInt(dateStrArray[0]) - 1900;
+                int month = Integer.parseInt(dateStrArray[1]) - 1;
+                int day = Integer.parseInt(dateStrArray[2]);
+                Date date = new Date(year, month, day);
+                dateTimes.add(String.valueOf((date.getTime() - date.getTimezoneOffset() * 60000L) / DAY_TO_MILL_SECS));
+            } else {
+                throw new UnsupportedOperationException("decode date failed: " + dateStr);
+            }
+        }
+        return dateTimes;
     }
 
     private List<Object> getValue(List<Expression> rightExpression,
