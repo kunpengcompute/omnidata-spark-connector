@@ -98,7 +98,7 @@ import java.util.Set;
  * @since 2021-03-31
  */
 public class DataIoAdapter {
-    private static int TASK_FAILED_TIMES = 3;
+    private int TASK_FAILED_TIMES = 3;
 
     private List<Type> omnidataTypes = new ArrayList<>();
 
@@ -207,10 +207,10 @@ public class DataIoAdapter {
             }
             String ipAddress = InetAddress.getByName(sdiHost).getHostAddress();
             properties.put("grpc.client.target", ipAddress + ":" + pageCandidate.getSdiPort());
-            orcDataReader = new DataReaderImpl<SparkDeserializer>(
-                properties, taskSource, deserializer);
-            hasNextPage = true;
             try {
+                orcDataReader = new DataReaderImpl<SparkDeserializer>(
+                        properties, taskSource, deserializer);
+                hasNextPage = true;
                 page = (WritableColumnVector[]) orcDataReader.getNextPageBlocking();
                 if (orcDataReader.isFinished()) {
                     orcDataReader.close();
@@ -248,13 +248,17 @@ public class DataIoAdapter {
                     default:
                         LOG.warn("OmniDataException: OMNIDATA_ERROR.");
                 }
+                LOG.warn("Failed host name is : {}.", sdiHost);
                 ++failedTimes;
             } catch (Exception e) {
+                LOG.warn("Failed host name is : {}.", sdiHost);
                 ++failedTimes;
             }
         }
-        if (failedTimes >= TASK_FAILED_TIMES) {
-            throw new TaskExecutionException("No Omni-data-server to Connect.");
+        int retryTime = Math.min(TASK_FAILED_TIMES, sdiHostArray.length);
+        if (failedTimes >= retryTime) {
+            LOG.warn("No Omni-data-server to Connect, Task has tried {} times.", retryTime);
+            throw new TaskExecutionException("No Omni-data-server to Connect");
         }
         List<WritableColumnVector[]> l = new ArrayList<>();
         l.add(page);
