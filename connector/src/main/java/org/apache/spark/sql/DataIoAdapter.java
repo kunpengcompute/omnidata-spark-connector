@@ -704,11 +704,10 @@ public class DataIoAdapter {
         if (leftExpression instanceof AttributeReference) {
             prestoType = NdpUtils.transOlkDataType(leftExpression.dataType(), false);
             filterProjectionId = putFilterValue(leftExpression, prestoType);
-        } else if (NdpUtils.isInDateExpression(leftExpression, operatorName)) {
-            ndpUdfExpressions.createNdpUdf(leftExpression, expressionInfo, fieldMap);
-            putFilterValue(expressionInfo.getChildExpression(), expressionInfo.getFieldDataType());
+        } else if (leftExpression instanceof Cast && (operatorName.equals("in")
+                || leftExpression.dataType().toString().toLowerCase(Locale.ENGLISH).equals("datetype"))) {
             prestoType = NdpUtils.transOlkDataType(((Cast) leftExpression).child().dataType(), false);
-            filterProjectionId = expressionInfo.getProjectionId();
+            filterProjectionId = putFilterValue(((Cast) leftExpression).child(), prestoType);
         } else {
             ndpUdfExpressions.createNdpUdf(leftExpression, expressionInfo, fieldMap);
             putFilterValue(expressionInfo.getChildExpression(), expressionInfo.getFieldDataType());
