@@ -70,7 +70,7 @@ class FileScanRDDPushDown(
     columnOffset = NdpUtils.getColumnOffset(dataSchema, output)
     filterOutput = output
   }
-  val fpuMap = pushDownOperators.fpuHosts
+  var fpuMap = pushDownOperators.fpuHosts
   val filterExecution = pushDownOperators.filterExecutions
   val aggExecution = pushDownOperators.aggExecutions
   val limitExecution = pushDownOperators.limitExecution
@@ -83,6 +83,10 @@ class FileScanRDDPushDown(
     scala.collection.mutable.Map[String, scala.collection.mutable.Map[String, Seq[Expression]]]()
   var projectId = 0
   val expressions: util.ArrayList[Object] = new util.ArrayList[Object]()
+  private val timeOut = NdpConf.getNdpZookeeperTimeout(sparkSession)
+  private val parentPath = NdpConf.getNdpZookeeperPath(sparkSession)
+  private val zkAddress = NdpConf.getNdpZookeeperAddress(sparkSession)
+  private val aliveOmniDataServerNum = NdpConf.getNdpAliveOmnidata(sparkSession)
 
   override def compute(split: RDDPartition, context: TaskContext): Iterator[InternalRow] = {
     val pageToColumnarClass = new PageToColumnar(requiredSchema, output)
@@ -211,6 +215,11 @@ class FileScanRDDPushDown(
       }}
       val datanode = retHost.toSeq.sortWith((x, y) => x._2 > y._2).toIterator
       var mapNum = 0
+      if (fpuMap == null) {
+        val pushDownManagerClass = new PushDownManager()
+        fpuMap = pushDownManagerClass.getZookeeperData(timeOut, parentPath,
+          zkAddress, aliveOmniDataServerNum)
+      }
       while (datanode.hasNext && mapNum < 3) {
         val datanodeStr = datanode.next()._1
         if (fpuMap.contains(datanodeStr)) {
