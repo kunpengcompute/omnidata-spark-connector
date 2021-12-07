@@ -87,9 +87,13 @@ public class NdpUtils {
                     List<Expression> expressions = JavaConverters
                         .seqAsJavaList(aggregateFunction.children());
                     for (Expression expression : expressions) {
-                        columnName = expression.toString().split("#")[0];
-                        columnTempId = NdpUtils.getColumnId(expression.toString());
-                        break;
+                        columnName = expression.toString().split("#")[0].replaceAll("\\(", "");
+                        Pattern pattern = Pattern.compile(columnName + "#(\\d+)");
+                        Matcher matcher = pattern.matcher(expression.toString());
+                        if(matcher.find()) {
+                            columnTempId = Integer.parseInt(matcher.group(1));
+                            break;
+                        }
                     }
                     break;
                 }
