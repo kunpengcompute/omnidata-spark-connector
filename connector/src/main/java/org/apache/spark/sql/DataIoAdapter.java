@@ -206,6 +206,7 @@ public class DataIoAdapter {
                 }
             }
             String ipAddress = InetAddress.getByName(sdiHost).getHostAddress();
+            LOG.info("Push down node info: [hostname :{} ,ip :{}]", sdiHost, ipAddress);
             properties.put("grpc.client.target", ipAddress + ":" + pageCandidate.getSdiPort());
             try {
                 orcDataReader = new DataReaderImpl<SparkDeserializer>(
@@ -248,10 +249,10 @@ public class DataIoAdapter {
                     default:
                         LOG.warn("OmniDataException: OMNIDATA_ERROR.");
                 }
-                LOG.warn("Failed host name is : {}.", sdiHost);
+                LOG.warn("Push down failed node info [hostname :{} ,ip :{}]", sdiHost, ipAddress);
                 ++failedTimes;
             } catch (Exception e) {
-                LOG.warn("Failed host name is : {}.", sdiHost);
+                LOG.warn("Push down failed node info [hostname :{} ,ip :{}]", sdiHost, ipAddress);
                 ++failedTimes;
             }
         }
