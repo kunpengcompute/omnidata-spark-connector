@@ -21,13 +21,11 @@ import java.util
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
-
 import org.apache.parquet.io.ParquetDecodingException
-
-import org.apache.spark.{Partition => RDDPartition, SparkUpgradeException, TaskContext}
+import org.apache.spark.{SparkUpgradeException, TaskContext, Partition => RDDPartition}
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.rdd.{InputFileBlockHolder, RDD}
-import org.apache.spark.sql.{DataIoAdapter, NdpUtils, OmniDataProperties, PageCandidate, PageToColumnar, SparkSession}
+import org.apache.spark.sql.{DataIoAdapter, NdpUtils, OmniDataProperties, PageCandidate, PageToColumnar, PushDownManager, SparkSession}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.execution.QueryExecutionException
