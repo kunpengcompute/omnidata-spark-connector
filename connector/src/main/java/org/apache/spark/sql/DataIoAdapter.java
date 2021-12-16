@@ -203,6 +203,7 @@ public class DataIoAdapter {
             String ipAddress = InetAddress.getByName(sdiHost).getHostAddress();
             Properties properties = new Properties();
             properties.put("omnidata.client.target.list", ipAddress);
+            LOG.info("Push down node info: [hostname :{} ,ip :{}]", sdiHost, ipAddress);
             try {
                 orcDataReader = new DataReaderImpl<SparkDeserializer>(
                         properties, taskSource, deserializer);
@@ -244,10 +245,10 @@ public class DataIoAdapter {
                     default:
                         LOG.warn("OmniDataException: OMNIDATA_ERROR.");
                 }
-                LOG.warn("Failed host name is : {}.", sdiHost);
+                LOG.warn("Push down failed node info [hostname :{} ,ip :{}]", sdiHost, ipAddress);
                 ++failedTimes;
             } catch (Exception e) {
-                LOG.warn("Failed host name is : {}.", sdiHost);
+                LOG.warn("Push down failed node info [hostname :{} ,ip :{}]", sdiHost, ipAddress);
                 ++failedTimes;
             }
         }
@@ -701,11 +702,10 @@ public class DataIoAdapter {
         if (leftExpression instanceof AttributeReference) {
             prestoType = NdpUtils.transOlkDataType(leftExpression.dataType(), false);
             filterProjectionId = putFilterValue(leftExpression, prestoType);
-        } else if (NdpUtils.isInDateExpression(leftExpression, operatorName)) {
-            ndpUdfExpressions.createNdpUdf(leftExpression, expressionInfo, fieldMap);
-            putFilterValue(expressionInfo.getChildExpression(), expressionInfo.getFieldDataType());
+        } else if (leftExpression instanceof Cast && (operatorName.equals("in")
+                || leftExpression.dataType().toString().toLowerCase(Locale.ENGLISH).equals("datetype"))) {
             prestoType = NdpUtils.transOlkDataType(((Cast) leftExpression).child().dataType(), false);
-            filterProjectionId = expressionInfo.getProjectionId();
+            filterProjectionId = putFilterValue(((Cast) leftExpression).child(), prestoType);
         } else {
             ndpUdfExpressions.createNdpUdf(leftExpression, expressionInfo, fieldMap);
             putFilterValue(expressionInfo.getChildExpression(), expressionInfo.getFieldDataType());

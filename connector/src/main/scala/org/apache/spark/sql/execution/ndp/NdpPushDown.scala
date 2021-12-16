@@ -173,9 +173,14 @@ case class NdpPushDown(sparkSession: SparkSession)
   }
 
   def pushDownOperator(plan: SparkPlan): SparkPlan = {
+    val p = pushDownOperatorInternal(plan)
+    replaceWrapper(p)
+  }
+
+  def pushDownOperatorInternal(plan: SparkPlan): SparkPlan = {
     val p = plan.transformUp {
       case a: AdaptiveSparkPlanExec =>
-        InsertAdaptiveSparkPlan(a.context)(pushDownOperator(a.initialPlan))
+        pushDownOperatorInternal(a.initialPlan)
       case s: FileSourceScanExec if shouldPushDown(s.relation) =>
         val filters = s.partitionFilters.filter { x =>
           filterWhiteList.contains(x.prettyName) || udfWhiteList.contains(x.prettyName)
