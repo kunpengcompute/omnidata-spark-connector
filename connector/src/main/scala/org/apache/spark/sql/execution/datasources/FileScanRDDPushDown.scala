@@ -86,7 +86,6 @@ class FileScanRDDPushDown(
   private val parentPath = NdpConf.getNdpZookeeperPath(sparkSession)
   private val zkAddress = NdpConf.getNdpZookeeperAddress(sparkSession)
 
-
   override def compute(split: RDDPartition, context: TaskContext): Iterator[InternalRow] = {
     val pageToColumnarClass = new PageToColumnar(requiredSchema, output)
 
