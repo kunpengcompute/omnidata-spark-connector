@@ -62,7 +62,6 @@ case class NdpPushDown(sparkSession: SparkSession)
   private val timeOut = NdpConf.getNdpZookeeperTimeout(sparkSession)
   private val parentPath = NdpConf.getNdpZookeeperPath(sparkSession)
   private val zkAddress = NdpConf.getNdpZookeeperAddress(sparkSession)
-  private val aliveOmniDataServerNum = NdpConf.getNdpAliveOmnidata(sparkSession)
 
   override def apply(plan: SparkPlan): SparkPlan = {
     if (pushDownEnabled && shouldPushDown(plan) && shouldPushDown()) {
@@ -96,8 +95,7 @@ case class NdpPushDown(sparkSession: SparkSession)
 
   def shouldPushDown(): Boolean = {
     val pushDownManagerClass = new PushDownManager()
-    fpuHosts = pushDownManagerClass.getZookeeperData(timeOut, parentPath,
-      zkAddress, aliveOmniDataServerNum)
+    fpuHosts = pushDownManagerClass.getZookeeperData(timeOut, parentPath, zkAddress)
     fpuHosts.nonEmpty
   }
 
@@ -373,15 +371,6 @@ object NdpConf {
       _.toInt, "int", sparkSession)
     checkLongValue(NDP_ZOOKEEPER_TIMEOUT, result, _ > 0,
       s"The $NDP_ZOOKEEPER_TIMEOUT value must be positive", sparkSession)
-    result
-  }
-
-  def getNdpAliveOmnidata(sparkSession: SparkSession): Int = {
-    val result = toNumber(NDP_ALIVE_OMNIDATA,
-      sparkSession.conf.getOption(NDP_ALIVE_OMNIDATA).getOrElse("0"),
-      _.toInt, "int", sparkSession)
-    checkLongValue(NDP_ALIVE_OMNIDATA, result, _ >= 0,
-      s"The $NDP_ALIVE_OMNIDATA value must be positive", sparkSession)
     result
   }
 

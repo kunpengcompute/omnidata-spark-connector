@@ -85,7 +85,6 @@ class FileScanRDDPushDown(
   private val timeOut = NdpConf.getNdpZookeeperTimeout(sparkSession)
   private val parentPath = NdpConf.getNdpZookeeperPath(sparkSession)
   private val zkAddress = NdpConf.getNdpZookeeperAddress(sparkSession)
-  private val aliveOmniDataServerNum = NdpConf.getNdpAliveOmnidata(sparkSession)
 
   override def compute(split: RDDPartition, context: TaskContext): Iterator[InternalRow] = {
     val pageToColumnarClass = new PageToColumnar(requiredSchema, output)
@@ -216,8 +215,7 @@ class FileScanRDDPushDown(
       var mapNum = 0
       if (fpuMap == null) {
         val pushDownManagerClass = new PushDownManager()
-        fpuMap = pushDownManagerClass.getZookeeperData(timeOut, parentPath,
-          zkAddress, aliveOmniDataServerNum)
+        fpuMap = pushDownManagerClass.getZookeeperData(timeOut, parentPath, zkAddress)
       }
       while (datanode.hasNext && mapNum < maxFailedTimes) {
         val datanodeStr = datanode.next()._1
