@@ -46,6 +46,7 @@ import org.apache.spark.sql.catalyst.expressions.And;
 import org.apache.spark.sql.catalyst.expressions.Attribute;
 import org.apache.spark.sql.catalyst.expressions.AttributeReference;
 import org.apache.spark.sql.catalyst.expressions.BinaryArithmetic;
+import org.apache.spark.sql.catalyst.expressions.Cast;
 import org.apache.spark.sql.catalyst.expressions.Divide;
 import org.apache.spark.sql.catalyst.expressions.EqualTo;
 import org.apache.spark.sql.catalyst.expressions.Expression;
@@ -76,6 +77,7 @@ import org.slf4j.LoggerFactory;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.sql.Date;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -94,7 +96,7 @@ import java.util.Set;
  * DataIoAdapter
  */
 public class DataIoAdapter {
-    private static int TASK_FAILED_TIMES = 3;
+    private int TASK_FAILED_TIMES = 3;
 
     private List<Type> omnidataTypes = new ArrayList<>();
 
@@ -201,10 +203,11 @@ public class DataIoAdapter {
             String ipAddress = InetAddress.getByName(sdiHost).getHostAddress();
             Properties properties = new Properties();
             properties.put("omnidata.client.target.list", ipAddress);
-            orcDataReader = new DataReaderImpl<SparkDeserializer>(
-                properties, taskSource, deserializer);
-            hasNextPage = true;
+            LOG.info("Push down node info: [hostname :{} ,ip :{}]", sdiHost, ipAddress);
             try {
+                orcDataReader = new DataReaderImpl<SparkDeserializer>(
+                        properties, taskSource, deserializer);
+                hasNextPage = true;
                 page = (WritableColumnVector[]) orcDataReader.getNextPageBlocking();
                 if (orcDataReader.isFinished()) {
                     orcDataReader.close();
@@ -242,13 +245,16 @@ public class DataIoAdapter {
                     default:
                         LOG.warn("OmniDataException: OMNIDATA_ERROR.");
                 }
+                LOG.warn("Push down failed node info [hostname :{} ,ip :{}]", sdiHost, ipAddress);
                 ++failedTimes;
             } catch (Exception e) {
+                LOG.warn("Push down failed node info [hostname :{} ,ip :{}]", sdiHost, ipAddress);
                 ++failedTimes;
             }
         }
-        if (failedTimes >= TASK_FAILED_TIMES) {
-            LOG.warn("No Omni-data-server to Connect, Tast has tried {} times.", TASK_FAILED_TIMES);
+        int retryTime = Math.min(TASK_FAILED_TIMES, sdiHostArray.length);
+        if (failedTimes >= retryTime) {
+            LOG.warn("No Omni-data-server to Connect, Task has tried {} times.", retryTime);
             throw new TaskExecutionException("No Omni-data-server to Connect");
         }
         List<WritableColumnVector[]> l = new ArrayList<>();
@@ -696,6 +702,10 @@ public class DataIoAdapter {
         if (leftExpression instanceof AttributeReference) {
             prestoType = NdpUtils.transOlkDataType(leftExpression.dataType(), false);
             filterProjectionId = putFilterValue(leftExpression, prestoType);
+        } else if (leftExpression instanceof Cast && (operatorName.equals("in")
+                || leftExpression.dataType().toString().toLowerCase(Locale.ENGLISH).equals("datetype"))) {
+            prestoType = NdpUtils.transOlkDataType(((Cast) leftExpression).child().dataType(), false);
+            filterProjectionId = putFilterValue(((Cast) leftExpression).child(), prestoType);
         } else {
             ndpUdfExpressions.createNdpUdf(leftExpression, expressionInfo, fieldMap);
             putFilterValue(expressionInfo.getChildExpression(), expressionInfo.getFieldDataType());
@@ -717,8 +727,12 @@ public class DataIoAdapter {
                 null, multiArguments, "multy_columns");
         } else {
             // get right value
-            argumentValues = getValue(rightExpression, signatureName,
-                leftExpression.dataType().toString());
+            if (NdpUtils.isInDateExpression(leftExpression, operatorName)) {
+                argumentValues = getDateValue(rightExpression);
+            } else {
+                argumentValues = getValue(rightExpression, signatureName,
+                        leftExpression.dataType().toString());
+            }
             rowExpression = NdpFilterUtils.generateRowExpression(
                 signatureName, expressionInfo, prestoType, filterProjectionId,
                 argumentValues, null, signatureName);
@@ -749,6 +763,26 @@ public class DataIoAdapter {
             columnNameMap.put(filterColumnName, columnNameMap.size());
         }
         return filterProjectionId;
+    }
+
+    // for date parse
+    private List<Object> getDateValue(List<Expression> rightExpression) {
+        long DAY_TO_MILL_SECS = 24L * 3600L * 1000L;
+        List<Object> dateTimes = new ArrayList<>();
+        for (Expression rExpression: rightExpression) {
+            String dateStr = rExpression.toString();
+            if (NdpUtils.isValidDateFormat(dateStr)) {
+                String[] dateStrArray = dateStr.split("-");
+                int year = Integer.parseInt(dateStrArray[0]) - 1900;
+                int month = Integer.parseInt(dateStrArray[1]) - 1;
+                int day = Integer.parseInt(dateStrArray[2]);
+                Date date = new Date(year, month, day);
+                dateTimes.add(String.valueOf((date.getTime() - date.getTimezoneOffset() * 60000L) / DAY_TO_MILL_SECS));
+            } else {
+                throw new UnsupportedOperationException("decode date failed: " + dateStr);
+            }
+        }
+        return dateTimes;
     }
 
     private List<Object> getValue(List<Expression> rightExpression,

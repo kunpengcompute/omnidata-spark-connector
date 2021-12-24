@@ -26,6 +26,7 @@ import org.apache.spark.sql.catalyst.expressions.{And, Attribute, AttributeRefer
 import org.apache.spark.sql.catalyst.expressions.aggregate.{Partial, PartialMerge}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.{FileSourceScanExec, FilterExec, GlobalLimitExec, LeafExecNode, LocalLimitExec, ProjectExec, SparkPlan}
+import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, InsertAdaptiveSparkPlan}
 import org.apache.spark.sql.execution.aggregate.{BaseAggregateExec, HashAggregateExec, ObjectHashAggregateExec, SortAggregateExec}
 import org.apache.spark.sql.execution.datasources.HadoopFsRelation
 import org.apache.spark.sql.internal.SQLConf
@@ -61,7 +62,6 @@ case class NdpPushDown(sparkSession: SparkSession)
   private val timeOut = NdpConf.getNdpZookeeperTimeout(sparkSession)
   private val parentPath = NdpConf.getNdpZookeeperPath(sparkSession)
   private val zkAddress = NdpConf.getNdpZookeeperAddress(sparkSession)
-  private val aliveOmniDataServerNum = NdpConf.getNdpAliveOmnidata(sparkSession)
 
   override def apply(plan: SparkPlan): SparkPlan = {
     if (pushDownEnabled && shouldPushDown(plan) && shouldPushDown()) {
@@ -74,6 +74,11 @@ case class NdpPushDown(sparkSession: SparkSession)
   def shouldPushDown(plan: SparkPlan): Boolean = {
     var isPush = false
     val p = plan.transformUp {
+      case a: AdaptiveSparkPlanExec =>
+        if (shouldPushDown(a.initialPlan)) {
+          isPush = true
+        }
+        plan
       case s: FileSourceScanExec =>
         if (s.metadata.get("Location").toString.contains("[hdfs") ||
           s.metadata.get("Location").toString.contains("[cephrgw") ||
@@ -90,8 +95,7 @@ case class NdpPushDown(sparkSession: SparkSession)
 
   def shouldPushDown(): Boolean = {
     val pushDownManagerClass = new PushDownManager()
-    fpuHosts = pushDownManagerClass.getZookeeperData(timeOut, parentPath,
-      zkAddress, aliveOmniDataServerNum)
+    fpuHosts = pushDownManagerClass.getZookeeperData(timeOut, parentPath, zkAddress)
     fpuHosts.nonEmpty
   }
 
@@ -167,7 +171,14 @@ case class NdpPushDown(sparkSession: SparkSession)
   }
 
   def pushDownOperator(plan: SparkPlan): SparkPlan = {
+    val p = pushDownOperatorInternal(plan)
+    replaceWrapper(p)
+  }
+
+  def pushDownOperatorInternal(plan: SparkPlan): SparkPlan = {
     val p = plan.transformUp {
+      case a: AdaptiveSparkPlanExec =>
+        pushDownOperatorInternal(a.initialPlan)
       case s: FileSourceScanExec if shouldPushDown(s.relation) =>
         val filters = s.partitionFilters.filter { x =>
           filterWhiteList.contains(x.prettyName) || udfWhiteList.contains(x.prettyName)
@@ -360,15 +371,6 @@ object NdpConf {
       _.toInt, "int", sparkSession)
     checkLongValue(NDP_ZOOKEEPER_TIMEOUT, result, _ > 0,
       s"The $NDP_ZOOKEEPER_TIMEOUT value must be positive", sparkSession)
-    result
-  }
-
-  def getNdpAliveOmnidata(sparkSession: SparkSession): Int = {
-    val result = toNumber(NDP_ALIVE_OMNIDATA,
-      sparkSession.conf.getOption(NDP_ALIVE_OMNIDATA).getOrElse("0"),
-      _.toInt, "int", sparkSession)
-    checkLongValue(NDP_ALIVE_OMNIDATA, result, _ >= 0,
-      s"The $NDP_ALIVE_OMNIDATA value must be positive", sparkSession)
     result
   }
 

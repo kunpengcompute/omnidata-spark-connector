@@ -21,13 +21,11 @@ import java.util
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
-
 import org.apache.parquet.io.ParquetDecodingException
-
-import org.apache.spark.{Partition => RDDPartition, SparkUpgradeException, TaskContext}
+import org.apache.spark.{SparkUpgradeException, TaskContext, Partition => RDDPartition}
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.rdd.{InputFileBlockHolder, RDD}
-import org.apache.spark.sql.{DataIoAdapter, NdpUtils, PageCandidate, PageToColumnar, SparkSession}
+import org.apache.spark.sql.{DataIoAdapter, NdpUtils, PageCandidate, PageToColumnar, PushDownManager, SparkSession}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.execution.QueryExecutionException
@@ -65,7 +63,7 @@ class FileScanRDDPushDown(
     columnOffset = NdpUtils.getColumnOffset(dataSchema, output)
     filterOutput = output
   }
-  val fpuMap = pushDownOperators.fpuHosts
+  var fpuMap = pushDownOperators.fpuHosts
   var fpuList : Seq[String] = Seq()
   val fpuIterator = fpuMap.toIterator
   while (fpuIterator.hasNext) {
@@ -84,6 +82,9 @@ class FileScanRDDPushDown(
     scala.collection.mutable.Map[String, scala.collection.mutable.Map[String, Seq[Expression]]]()
   var projectId = 0
   val expressions: util.ArrayList[Object] = new util.ArrayList[Object]()
+  private val timeOut = NdpConf.getNdpZookeeperTimeout(sparkSession)
+  private val parentPath = NdpConf.getNdpZookeeperPath(sparkSession)
+  private val zkAddress = NdpConf.getNdpZookeeperAddress(sparkSession)
 
   override def compute(split: RDDPartition, context: TaskContext): Iterator[InternalRow] = {
     val pageToColumnarClass = new PageToColumnar(requiredSchema, output)
@@ -212,6 +213,10 @@ class FileScanRDDPushDown(
 
       val datanode = retHost.toSeq.sortWith((x, y) => x._2 > y._2).toIterator
       var mapNum = 0
+      if (fpuMap == null) {
+        val pushDownManagerClass = new PushDownManager()
+        fpuMap = pushDownManagerClass.getZookeeperData(timeOut, parentPath, zkAddress)
+      }
       while (datanode.hasNext && mapNum < maxFailedTimes) {
         val datanodeStr = datanode.next()._1
         if (fpuMap.contains(datanodeStr)) {
