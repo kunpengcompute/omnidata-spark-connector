@@ -81,6 +81,8 @@ public class NdpUdfExpressions {
             createNdpSplit((StringSplit) udfExpression, prestoExpressionInfo, fieldMap);
         } else if (udfExpression instanceof GetArrayItem) {
             createNdpSubscript((GetArrayItem) udfExpression, prestoExpressionInfo, fieldMap);
+        } else if (udfExpression instanceof org.apache.spark.sql.hive.HiveSimpleUDF) {
+            createHiveSimpleUdf((HiveSimpleUDF) udfExpression, prestoExpressionInfo, fieldMap);
         } else {
             throw new RuntimeException("unsupported this UDF:" + udfExpression.toString());
         }
@@ -131,6 +133,31 @@ public class NdpUdfExpressions {
         Map<String, Integer> fieldMap) {
         createNdpSingleParameter(NdpUdfEnum.CAST,
             expression, expression.child(), prestoExpressionInfo, fieldMap);
+    }
+
+    public void createHiveSimpleUdf(HiveSimpleUDF hiveSimpleUDFExpression,
+        PrestoExpressionInfo prestoExpressionInfo,
+        Map<String, Integer> fieldMap) {
+        String signatureName = hiveSimpleUDFExpression.name();
+        List<Expression> hiveSimpleUdf = JavaConverters.seqAsJavaList(
+            hiveSimpleUDFExpression.children());
+        Type returnType = NdpUtils.transOlkDataType(
+            hiveSimpleUDFExpression.dataType(), true);
+        List<RowExpression> rowArguments = new ArrayList<>();
+        Type strTypeCandidate = returnType;
+        for (Expression hiveUdf : hiveSimpleUdf) {
+            strTypeCandidate = NdpUtils.transOlkDataType(hiveUdf.dataType(), true);
+            checkAttributeReference(hiveUdf, prestoExpressionInfo,
+                fieldMap, strTypeCandidate, rowArguments);
+        }
+        Signature signature = new Signature(
+            QualifiedObjectName.valueOfDefaultFunction(signatureName),
+            FunctionKind.SCALAR, new TypeSignature(returnType.toString()),
+            new TypeSignature(strTypeCandidate.toString()));
+        RowExpression resExpression = new CallExpression(signatureName.toLowerCase(Locale.ENGLISH),
+            new BuiltInFunctionHandle(signature), returnType, rowArguments);
+        prestoExpressionInfo.setReturnType(returnType);
+        prestoExpressionInfo.setPrestoRowExpression(resExpression);
     }
 
     public void createNdpSubstring(Substring expression, PrestoExpressionInfo prestoExpressionInfo,
