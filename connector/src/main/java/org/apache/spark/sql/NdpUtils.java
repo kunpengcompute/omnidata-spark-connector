@@ -254,7 +254,7 @@ public class NdpUtils {
             case "date":
             case "tinyint":
             case "smallint":
-                long longValue = Integer.parseInt(argumentValue);
+                long longValue = Long.parseLong(argumentValue);
                 return new ConstantExpression(longValue, argumentType);
             case "real":
                 return new ConstantExpression(
