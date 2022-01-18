@@ -38,7 +38,7 @@ case class NdpPushDown(sparkSession: SparkSession)
   private var fpuHosts: scala.collection.Map[String, String] = _
 
   // filter performance blackList: like, startswith, endswith, contains
-  private val filterWhiteList = Set("or", "and", "not", "equalto", "isnotnull", "lessthan",
+  private val filterWhiteList = Set("or", "and", "not", "equalto", "lessthan",
     "greaterthan", "greaterthanorequal", "lessthanorequal", "in", "literal", "isnull",
     "attributereference")
   private val attrWhiteList = Set("long", "integer", "byte", "short", "float", "double",
