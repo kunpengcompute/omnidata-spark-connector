@@ -117,7 +117,8 @@ case class NdpPushDown(sparkSession: SparkSession)
   private def supportedHiveStringType(attr: Attribute): Boolean = {
     if (attr.dataType.typeName.equals("string")) {
       !attr.metadata.contains("HIVE_TYPE_STRING") ||
-        attr.metadata.getString("HIVE_TYPE_STRING").startsWith("varchar")
+        attr.metadata.getString("HIVE_TYPE_STRING").startsWith("varchar") ||
+        attr.metadata.getString("HIVE_TYPE_STRING").startsWith("char")
     } else {
       false
     }
