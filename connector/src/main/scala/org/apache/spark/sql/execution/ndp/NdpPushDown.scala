@@ -30,7 +30,7 @@ import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, InsertAda
 import org.apache.spark.sql.execution.aggregate.{BaseAggregateExec, HashAggregateExec, ObjectHashAggregateExec, SortAggregateExec}
 import org.apache.spark.sql.execution.datasources.HadoopFsRelation
 import org.apache.spark.sql.internal.SQLConf
-`import org.apache.spark.sql.sources.DataSourceRegister
+import org.apache.spark.sql.sources.DataSourceRegister
 
 case class NdpPushDown(sparkSession: SparkSession)
   extends Rule[SparkPlan] with PredicateHelper {
