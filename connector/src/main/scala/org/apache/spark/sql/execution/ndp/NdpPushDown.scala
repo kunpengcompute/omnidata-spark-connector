@@ -30,14 +30,14 @@ import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, InsertAda
 import org.apache.spark.sql.execution.aggregate.{BaseAggregateExec, HashAggregateExec, ObjectHashAggregateExec, SortAggregateExec}
 import org.apache.spark.sql.execution.datasources.HadoopFsRelation
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.sources.DataSourceRegister
+`import org.apache.spark.sql.sources.DataSourceRegister
 
 case class NdpPushDown(sparkSession: SparkSession)
   extends Rule[SparkPlan] with PredicateHelper {
   private val pushDownEnabled = NdpConf.getNdpEnabled(sparkSession)
   private var fpuHosts: scala.collection.Map[String, String] = _
   // filter performance blackList: like, startswith, endswith, contains
-  private val filterWhiteList = Set("or", "and", "not", "equalto", "lessthan",
+  private val filterWhiteList = Set("or", "and", "not", "equalto", "isnotnull", "lessthan",
     "greaterthan", "greaterthanorequal", "lessthanorequal", "in", "literal", "isnull",
     "attributereference")
   private val attrWhiteList = Set("long", "integer", "byte", "short", "float", "double",
