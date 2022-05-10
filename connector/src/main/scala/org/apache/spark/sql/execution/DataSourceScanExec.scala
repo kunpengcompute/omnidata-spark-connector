@@ -31,6 +31,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.QueryPlan
 import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, Partitioning, UnknownPartitioning}
 import org.apache.spark.sql.catalyst.util.truncatedString
+import org.apache.spark.sql.execution.datasources.{FileScanRDDPushDown, _}
 import org.apache.spark.sql.execution.datasources.parquet.{ParquetFileFormat => ParquetSource}
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
 import org.apache.spark.sql.execution.ndp.NdpSupport
@@ -572,7 +573,12 @@ case class FileSourceScanExec(
         FilePartition(bucketId, prunedFilesGroupedToBuckets.getOrElse(bucketId, Array.empty))
       }
     }
-    new FileScanRDD(fsRelation.sparkSession, readFile, filePartitions)
+      if (isPushDown) {
+        new FileScanRDDPushDown(fsRelation.sparkSession, filePartitions, requiredSchema, output,
+          relation.dataSchema, ndpOperators, partiTionColumn, supportsColumnar, fsRelation.fileFormat)
+      } else {
+        new FileScanRDD(fsRelation.sparkSession, readFile, filePartitions)
+      }
 
   }
 
@@ -614,7 +620,13 @@ case class FileSourceScanExec(
       val partitions =
         FilePartition.getFilePartitions(relation.sparkSession, splitFiles, maxSplitBytes)
 
-      new FileScanRDD(fsRelation.sparkSession, readFile, partitions)
+      if (isPushDown) {
+        new FileScanRDDPushDown(fsRelation.sparkSession, partitions, requiredSchema, output,
+          relation.dataSchema, ndpOperators, partiTionColumn, supportsColumnar, fsRelation.fileFormat)
+      } else {
+        // TODO 重写一个FileScanRDD 重新调用
+        new FileScanRDD(fsRelation.sparkSession, readFile, partitions)
+      }
     }
 
   // Filters unused DynamicPruningExpression expressions - one which has been replaced
