@@ -54,7 +54,9 @@ case class NdpPushDown(sparkSession: SparkSession)
   private val aggFuncWhiteList = Set("max", "min", "count", "avg", "sum")
   private val aggExpressionWhiteList =
     Set("multiply", "add", "subtract", "divide", "remainder", "literal", "attributereference")
+  private val selectivityThreshold = NdpConf.getNdpFilterSelectivity(sparkSession)
   private val tableSizeThreshold = NdpConf.getNdpTableSizeThreshold(sparkSession)
+  private val filterSelectivityEnable = NdpConf.getNdpFilterSelectivityEnable(sparkSession)
   private val tableFileFormatWhiteList = Set("orc", "parquet")
   private val parquetSchemaMergingEnabled = NdpConf.getParquetMergeSchema(sparkSession)
   private val timeOut = NdpConf.getNdpZookeeperTimeout(sparkSession)
@@ -72,6 +74,11 @@ case class NdpPushDown(sparkSession: SparkSession)
   def shouldPushDown(plan: SparkPlan): Boolean = {
     var isPush = false
     val p = plan.transformUp {
+      case a: AdaptiveSparkPlanExec =>
+        if (shouldPushDown(a.inputPlan)) {
+          isPush = true
+        }
+        plan
       case s: FileSourceScanExec =>
         if (s.metadata.get("Location").toString.contains("[hdfs") ||
           s.metadata.get("Location").toString.contains("[cephrgw") ||
@@ -139,6 +146,12 @@ case class NdpPushDown(sparkSession: SparkSession)
     scan.limitExeInfo.isEmpty
   }
 
+  def filterSelectivityEnabled: Boolean = {
+    filterSelectivityEnable &&
+      sparkSession.conf.get(SQLConf.CBO_ENABLED) &&
+      sparkSession.conf.get(SQLConf.PLAN_STATS_ENABLED)
+  }
+
   def replaceWrapper(plan: SparkPlan): SparkPlan = {
     plan.transform {
       case s: NdpScanWrapper =>
@@ -175,28 +188,46 @@ case class NdpPushDown(sparkSession: SparkSession)
 
   def pushDownOperatorInternal(plan: SparkPlan): SparkPlan = {
     val p = plan.transformUp {
+      case a: AdaptiveSparkPlanExec =>
+        pushDownOperatorInternal(a.inputPlan)
       case s: FileSourceScanExec if shouldPushDown(s.relation) =>
         val filters = s.partitionFilters.filter { x =>
           filterWhiteList.contains(x.prettyName) || udfWhiteList.contains(x.prettyName)
         }
         NdpScanWrapper(s, s.output, filters)
       case f @ FilterExec(condition, s: NdpScanWrapper, selectivity) if shouldPushDown(f, s.scan) =>
-        // partial pushdown
-        val (otherFilters, pushDownFilters) =
-          (splitConjunctivePredicates(condition) ++ s.partitionFilters).partition { x =>
-            x.find { y =>
-            !filterWhiteList.contains(y.prettyName) &&
-              !udfWhiteList.contains(y.prettyName)
-          }.isDefined
-        }
-        if (pushDownFilters.nonEmpty) {
-          s.scan.pushDownFilter(FilterExeInfo(pushDownFilters.reduce(And), f.output))
-        }
-        s.update(f.output)
-        if (otherFilters.nonEmpty) {
-          FilterExec(otherFilters.reduce(And), s)
+        if (filterSelectivityEnabled &&
+          selectivity.nonEmpty &&
+          selectivity.get > selectivityThreshold.toDouble) {
+          logInfo(s"Fail to push down filter, since " +
+            s"selectivity[${selectivity.get}] > threshold[${selectivityThreshold}] " +
+            s"for condition[${condition}]")
+          f
+        } else if(isDynamiCpruning(f)){
+          logInfo(s"Fail to push down filter, since ${s.scan.nodeName} contains dynamic pruning")
+          f
         } else {
-          s
+          // TODO: move selectivity info to pushdown-info
+          if (filterSelectivityEnabled && selectivity.nonEmpty) {
+            logInfo(s"Selectivity: ${selectivity.get}")
+          }
+          // partial pushdown
+          val (otherFilters, pushDownFilters) =
+            (splitConjunctivePredicates(condition) ++ s.partitionFilters).partition { x =>
+              x.find { y =>
+              !filterWhiteList.contains(y.prettyName) &&
+                !udfWhiteList.contains(y.prettyName)
+            }.isDefined
+          }
+          if (pushDownFilters.nonEmpty) {
+            s.scan.pushDownFilter(FilterExeInfo(pushDownFilters.reduce(And), f.output))
+          }
+          s.update(f.output)
+          if (otherFilters.nonEmpty) {
+            FilterExec(otherFilters.reduce(And), s)
+          } else {
+            s
+          }
         }
       case p @ ProjectExec(projectList, s: NdpScanWrapper) if shouldPushDown(projectList, s) =>
         s.update(p.output)
@@ -260,9 +291,11 @@ case class NdpScanWrapper(
 object NdpConf {
   val NDP_ENABLED = "spark.sql.ndp.enabled"
   val PARQUET_MERGESCHEMA = "spark.sql.parquet.mergeSchema"
+  val NDP_FILTER_SELECTIVITY_ENABLE = "spark.sql.ndp.filter.selectivity.enable"
   val NDP_TABLE_SIZE_THRESHOLD = "spark.sql.ndp.table.size.threshold"
   val NDP_ZOOKEEPER_TIMEOUT = "spark.sql.ndp.zookeeper.timeout"
   val NDP_ALIVE_OMNIDATA = "spark.sql.ndp.alive.omnidata"
+  val NDP_FILTER_SELECTIVITY = "spark.sql.ndp.filter.selectivity"
   val NDP_UDF_WHITELIST = "spark.sql.ndp.udf.whitelist"
   val NDP_ZOOKEEPER_PATH = "spark.sql.ndp.zookeeper.path"
   val NDP_ZOOKEEPER_ADDRESS = "spark.sql.ndp.zookeeper.address"
@@ -332,6 +365,11 @@ object NdpConf {
       sparkSession.conf.getOption(PARQUET_MERGESCHEMA).getOrElse("false"), sparkSession)
   }
 
+  def getNdpFilterSelectivityEnable(sparkSession: SparkSession): Boolean = {
+    toBoolean(NDP_FILTER_SELECTIVITY_ENABLE,
+      sparkSession.conf.getOption(NDP_FILTER_SELECTIVITY_ENABLE).getOrElse("true"), sparkSession)
+  }
+
   def getNdpTableSizeThreshold(sparkSession: SparkSession): Long = {
     val result = toNumber(NDP_TABLE_SIZE_THRESHOLD,
       sparkSession.conf.getOption(NDP_TABLE_SIZE_THRESHOLD).getOrElse("10240"),
@@ -347,6 +385,16 @@ object NdpConf {
       _.toInt, "int", sparkSession)
     checkLongValue(NDP_ZOOKEEPER_TIMEOUT, result, _ > 0,
       s"The $NDP_ZOOKEEPER_TIMEOUT value must be positive", sparkSession)
+    result
+  }
+
+  def getNdpFilterSelectivity(sparkSession: SparkSession): Double = {
+    val result = toNumber(NDP_FILTER_SELECTIVITY,
+      sparkSession.conf.getOption(NDP_FILTER_SELECTIVITY).getOrElse("0.5"),
+      _.toDouble, "double", sparkSession)
+    checkDoubleValue(NDP_FILTER_SELECTIVITY, result,
+      selectivity => selectivity >= 0.0 && selectivity <= 1.0,
+      s"The $NDP_FILTER_SELECTIVITY value must be in [0.0, 1.0].", sparkSession)
     result
   }
 
