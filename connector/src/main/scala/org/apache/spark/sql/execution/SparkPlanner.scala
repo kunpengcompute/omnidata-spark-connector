@@ -18,18 +18,15 @@
 package org.apache.spark.sql.execution
 
 import org.apache.spark.sql._
+import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.adaptive.LogicalQueryStageStrategy
 import org.apache.spark.sql.execution.datasources.{DataSourceStrategy, FileSourceStrategy}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Strategy
-import org.apache.spark.sql.internal.SQLConf
 
-class SparkPlanner(
-    val session: SparkSession,
-    val conf: SQLConf,
-    val experimentalMethods: ExperimentalMethods)
-  extends SparkStrategies {
+class SparkPlanner(val session: SparkSession, val experimentalMethods: ExperimentalMethods)
+  extends SparkStrategies with SQLConfHelper {
 
   def numPartitions: Int = conf.numShufflePartitions
 
@@ -40,7 +37,7 @@ class SparkPlanner(
       PythonEvals ::
       new DataSourceV2Strategy(session) ::
       FileSourceStrategy ::
-      DataSourceStrategy(conf) ::
+      DataSourceStrategy ::
       SpecialLimits ::
       Aggregation ::
       Window ::
@@ -83,8 +80,7 @@ class SparkPlanner(
       projectList: Seq[NamedExpression],
       filterPredicates: Seq[Expression],
       prunePushedDownFilters: Seq[Expression] => Seq[Expression],
-      scanBuilder: Seq[Attribute] => SparkPlan,
-      selectivity: Option[Double]): SparkPlan = {
+      scanBuilder: Seq[Attribute] => SparkPlan): SparkPlan = {
 
     val projectSet = AttributeSet(projectList.flatMap(_.references))
     val filterSet = AttributeSet(filterPredicates.flatMap(_.references))
@@ -103,10 +99,10 @@ class SparkPlanner(
       // when the columns of this projection are enough to evaluate all filter conditions,
       // just do a scan followed by a filter, with no extra project.
       val scan = scanBuilder(projectList.asInstanceOf[Seq[Attribute]])
-      filterCondition.map(FilterExec(_, scan, selectivity)).getOrElse(scan)
+      filterCondition.map(FilterExec(_, scan)).getOrElse(scan)
     } else {
       val scan = scanBuilder((projectSet ++ filterSet).toSeq)
-      ProjectExec(projectList, filterCondition.map(FilterExec(_, scan, selectivity))
+      ProjectExec(projectList, filterCondition.map(FilterExec(_, scan))
         .getOrElse(scan))
     }
   }
